@@ -29,8 +29,10 @@ async function checkPriority(category, description) {
   }
 };
 
-router.post("/", protect, upload.fields([ {name: "image"}]), async (req, res) => {
+router.post("/",protect, upload.fields([ {name: "image"}]), async (req, res) => {
   try {
+
+    console.log("inside upload")
     const { description, location, geoLocation, issueType } = req.body;
     const imageFile = req.files?.image?.[0];  
 
