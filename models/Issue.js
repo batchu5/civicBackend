@@ -2,21 +2,38 @@ import mongoose from "mongoose";
 
 const issueSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-  description: { type: String, required: true },
-  image: { type: String },
-  priority: {type: String},
-  issueType: {type: String},
 
+  // MULTILINGUAL DESCRIPTION
+  description: {
+    en: { type: String, required: true },
+    hi: { type: String }
+  },
+
+  // MULTILINGUAL ISSUE TYPE
+  issueType: {
+    en: { type: String },
+    hi: { type: String }
+  },
+
+  // MULTILINGUAL PRIORITY
+  priority: {
+    en: { type: String },
+    hi: { type: String }
+  },
+
+  image: { type: String },
+
+  // LOCATION
   geoLocation: {
     type: {
       type: String,
       enum: ["Point"],
-      default: "Point",
+      default: "Point"
     },
     coordinates: {
       type: [Number],
-      required: true,
-    },
+      required: true
+    }
   },
 
   locationDetails: {
@@ -26,29 +43,35 @@ const issueSchema = new mongoose.Schema({
     altitude: Number,
     heading: Number,
     altitudeAccuracy: Number,
-    speed: Number,
+    speed: Number
   },
 
   likes: [
     {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-    },
+      ref: "User"
+    }
   ],
+
   assignedTo: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "Staff",
+    ref: "Staff"
   },
 
+  // MULTILINGUAL STATUS
   status: {
-    type: String,
-    enum: ["pending", "assigned", "in-progress", "resolved"],
-    default: "pending",
+    en: {
+      type: String,
+      enum: ["pending", "assigned", "in-progress", "resolved"],
+      default: "pending"
+    },
+    hi: { type: String }
   },
 
-
-  date: { type: Date, default: Date.now },
+  date: { type: Date, default: Date.now }
 });
+
+// GEO INDEX
 issueSchema.index({ geoLocation: "2dsphere" });
 
 const Issue = mongoose.model("Issue", issueSchema);

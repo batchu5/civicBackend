@@ -169,19 +169,17 @@ router.get("/nearby", async (req, res) => {
     const userLat = Number(lat);
     const userLng = Number(lng);
 
-    // Query issues within 5 KM (5000 meters)
     const issues = await Issue.find({
       geoLocation: {
         $near: {
           $geometry: { type: "Point", coordinates: [userLng, userLat] },
-          $maxDistance: 5000, // 5km
+          $maxDistance: 5000, 
         },
       },
     });
 
     let sortedIssues = issues;
 
-    // High Priority FIRST
     if (mode === "high") {
       sortedIssues = issues.sort((a, b) => {
         const prioMap = { high: 3, medium: 2, low: 1 };
@@ -189,7 +187,6 @@ router.get("/nearby", async (req, res) => {
       });
     }
 
-    // Recent FIRST
     if (mode === "recent") {
       sortedIssues = issues.sort(
         (a, b) => new Date(b.date) - new Date(a.date)
@@ -205,8 +202,6 @@ router.get("/nearby", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch nearby issues" });
   }
 });
-
-
 
 router.post("/:id/like", protect, async (req, res) => {
   try {
@@ -264,8 +259,6 @@ router.get("/my", protect, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
-
-
 
 
 router.get("/bbox", async (req, res) => {
