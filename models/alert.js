@@ -2,9 +2,9 @@ import mongoose from "mongoose";
 
 const alertSchema = new mongoose.Schema(
   {
-    title: { type: String, required: true },
-    message: { type: String, required: true },
-    department: { type: String, required: true },
+    title: { type: {en: String, hi: String}, required: true },
+    message: { type: {en: String, hi: String}, required: true },
+    department: { type: {en: String, hi: String}, required: true },
   },
   { timestamps: true }
 );

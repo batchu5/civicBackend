@@ -1,8 +1,14 @@
 import express from "express";
 import Community from "../models/community.js";
 import User from "../models/User.js";
+import { translateToHindi } from "../utils/constants.js";
 
 const router = express.Router();
+
+function pickLang(obj, lang) {
+  if (!obj) return "";
+  return obj[lang] || obj.en || "";
+}
 
 
 router.post("/create", async (req, res) => {
@@ -10,13 +16,16 @@ router.post("/create", async (req, res) => {
     console.log("in create route")
     const { name, description, members } = req.body;
 
+    const name_hi = await translateToHindi(name);
+    const description_hi = await translateToHindi(description);
+
     if (!name) {
       return res.status(400).json({ error: "Community name is required" });
     }
 
     const community = await Community.create({
-      name,
-      description: description || "",
+      name : {en: name, hi: name_hi},
+      description: {en: description || "", hi: description_hi || ""},
       members: members || [],
     });
 
@@ -32,17 +41,26 @@ router.post("/create", async (req, res) => {
 
 router.get("/allcom", async (req, res) => {
   try {
+    const lang = req.query.lang || "en";
+    console.log("lang", lang);
     const communities = await Community.find().sort({ createdAt: -1 });
+
+    const formatted = communities.map(c => ({
+      _id: c._id,
+      name: pickLang(c.name, lang),
+      description: pickLang(c.description, lang),
+      members: c.members
+    }));
 
     res.json({
       count: communities.length,
-      communities,
+      communities: formatted
     });
   } catch (err) {
-    console.error("Get communities error:", err);
     res.status(500).json({ error: "Failed to fetch communities" });
   }
 });
+
 
 router.get("/all-users", async (req, res) => {
   try {

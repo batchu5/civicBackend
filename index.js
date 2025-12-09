@@ -48,7 +48,9 @@ import chatRoutes from "./routes/chatRoutes.js";
 import communityRoute from "./routes/communityRoute.js"
 import Message from "./models/Message.js";
 import alertRoutes from "./routes/alertRoutes.js";
+import mailRoute from "./routes/mailRoute.js";
 
+app.use("/mail", mailRoute);
 app.use("/alerts", alertRoutes);
 app.use("/community", communityRoute);
 app.use("/chat", chatRoutes);

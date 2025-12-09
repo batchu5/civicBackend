@@ -8,6 +8,7 @@ import protect from "../middleware/authMiddleware.js";
 import pkg from "expo-server-sdk";
 import { classifyIssue } from "../MLmodel.js";
 import sendMail from "../functions/mail.js";
+import { translateToHindi } from "../utils/constants.js";
 
 
 const upload = multer({ dest: "uploads/" }); 
@@ -29,93 +30,120 @@ async function checkPriority(category, description) {
   }
 };
 
-router.post("/",protect, upload.fields([ {name: "image"}]), async (req, res) => {
-  try {
+router.post(
+  "/",
+  protect,
+  upload.fields([{ name: "image" }]),
+  async (req, res) => {
+    try {
+      console.log("inside upload");
 
-    console.log("inside upload")
-    const { description, location, geoLocation, issueType } = req.body;
-    const imageFile = req.files?.image?.[0];  
+      const { description, location, geoLocation, issueType } = req.body;
+      const imageFile = req.files?.image?.[0];
 
-    const imageResult = await cloudinary.uploader.upload(imageFile.path, {
+      // Upload image
+      const imageResult = await cloudinary.uploader.upload(imageFile.path, {
         folder: "complaints",
-        format: "jpg",
-    });
+        format: "jpg"
+      });
 
+      console.log("Uploaded to Cloudinary");
 
-    console.log("Uploaded to Cloudinary");
-    const parsedGeo = JSON.parse(geoLocation);
-    const parsedLoc = JSON.parse(location);
-    const mlResult = await checkPriority(issueType, description);
+      const parsedGeo = JSON.parse(geoLocation);
+      const parsedLoc = JSON.parse(location);
 
-    console.log("ml result - priority", mlResult);
-    
-    if(!mlResult){
-      mlResult.priority = "urgent";
-      console.log("ml result is null here");
-      return;
-    }
+      // ML classification
+      const mlResult = await checkPriority(issueType, description);
 
-    let issue = await Issue.create({
-      user: req.user._id,
-      description,
-      image: imageResult.secure_url,
-      priority:  mlResult.priority,
-      issueType,
-      geoLocation: {
-        type: "Point",
-        coordinates: [
-          Number(parsedGeo.coordinates[0]),
-          Number(parsedGeo.coordinates[1]),
-        ],
-      },
-      locationDetails: parsedLoc,
-    });
+      if (!mlResult) {
+        mlResult.priority = "urgent";
+      }
 
-    console.log("created the issue");
-    
-    const nearestStaff = await Staff.findOne({
-      department: issueType,
-      geoLocation: {
-        $near: {
-          $geometry: {
-            type: "Point",
-            coordinates: [
-              Number(parsedGeo.coordinates[0]),
-              Number(parsedGeo.coordinates[1]),
-            ],
-          },
-          $maxDistance: 10000, 
+      // ---------------------------
+      // 🌐 MULTILINGUAL TRANSLATION
+      // ---------------------------
+      const desc_hi = await translateToHindi(description);
+      const type_hi = await translateToHindi(issueType);
+      const priority_hi = await translateToHindi(mlResult.priority);
+      const status_hi = await translateToHindi("pending");   // default
+
+      // ---------------------------
+      // Create multilingual issue
+      // ---------------------------
+      let issue = await Issue.create({
+        user: req.user._id,
+
+        description: { en: description, hi: desc_hi },
+        issueType: { en: issueType, hi: type_hi },
+        priority: { en: mlResult.priority, hi: priority_hi },
+        status: { en: "pending", hi: status_hi },
+
+        image: imageResult.secure_url,
+
+        geoLocation: {
+          type: "Point",
+          coordinates: [
+            Number(parsedGeo.coordinates[0]),
+            Number(parsedGeo.coordinates[1])
+          ]
         },
-      },
-    });
-    
-    console.log("nearestStaff", nearestStaff);
 
-    if (nearestStaff) {
-      console.log("Nearest Staff is found");
-      issue.assignedTo = nearestStaff._id;
-      issue.status = "assigned";
-      await issue.save();
+        locationDetails: parsedLoc
+      });
 
-      nearestStaff.assignedIssues.push(issue._id);
-      await nearestStaff.save();
+      console.log("created multilingual issue");
+
+      // FIND NEAREST STAFF
+      const nearestStaff = await Staff.findOne({
+        department: issueType,
+        geoLocation: {
+          $near: {
+            $geometry: {
+              type: "Point",
+              coordinates: [
+                Number(parsedGeo.coordinates[0]),
+                Number(parsedGeo.coordinates[1])
+              ]
+            },
+            $maxDistance: 10000
+          }
+        }
+      });
+
+      // ASSIGN ISSUE
+      if (nearestStaff) {
+        issue.assignedTo = nearestStaff._id;
+
+        // Update status multilingual
+        issue.status.en = "assigned";
+        issue.status.hi = await translateToHindi("assigned");
+        await sendMail("New Issue Assigned bro", description, "Please checkout your app", nearestStaff.email);
+        await issue.save();
+
+        nearestStaff.assignedIssues.push(issue._id);
+        await nearestStaff.save();
+      }
+
+      // SEND URGENT EMAIL
+      if (issue.priority.en === "urgent") {
+        const title = "Urgent issue has been recorded";
+        const desc = `The issue ID ${issue._id}, which comes under ${issue.issueType.en} has been recorded as Urgent.`;
+        const link = "https://x.com/home";
+        await sendMail(title, desc, link, req.user.email);
+      }
+
+      // Return English priority for UI
+      res.status(201).json({
+        priority: issue.priority.en
+      });
+
+    } catch (err) {
+      console.error("Issue creation error:", err);
+      res.status(500).json({ message: err.message });
     }
-
-    if(issue.priority === "urgent"){
-      const title = "urgent issue has been fixed";
-      const description = `The issue ID ${issue._id}, which comes under ${issue.issueType} has been recorded as Urgent, please look into matter through your dashboard`;
-      const link = "https://x.com/home"
-      await sendMail(title,description, link, req.user.email );
-    }
-
-    res.status(201).json({
-      "priority": issue.priority,
-    });
-  } catch (err) {
-    console.error("Issue creation error:", err);
-    res.status(500).json({ message: err.message });
   }
-});
+);
+
 
 router.post("/check-duplicate", protect, async (req, res) => {
   try {
@@ -159,8 +187,10 @@ router.post("/check-duplicate", protect, async (req, res) => {
 });
 
 router.get("/nearby", async (req, res) => {
+  console.log("inside nearby issues");
   try {
-    const { lat, lng, mode } = req.query;
+    const { lat, lng, mode, lang = "en" } = req.query;
+    console.log("mode is", mode);
 
     if (!lat || !lng || !mode) {
       return res.status(400).json({ error: "lat, lng, mode required" });
@@ -173,35 +203,59 @@ router.get("/nearby", async (req, res) => {
       geoLocation: {
         $near: {
           $geometry: { type: "Point", coordinates: [userLng, userLat] },
-          $maxDistance: 5000, 
-        },
-      },
+          $maxDistance: 5000
+        }
+      }
     });
 
     let sortedIssues = issues;
 
     if (mode === "high") {
+      const prioMap = { urgent: 4, high: 3, normal: 2, low: 1 };
+
       sortedIssues = issues.sort((a, b) => {
-        const prioMap = { high: 3, medium: 2, low: 1 };
-        return prioMap[b.priority] - prioMap[a.priority];
+        return prioMap[b.priority.en] - prioMap[a.priority.en];
       });
     }
 
-    if (mode === "recent") {
+    if (mode === "low") {
       sortedIssues = issues.sort(
         (a, b) => new Date(b.date) - new Date(a.date)
       );
     }
 
+    // ------------------------------
+    // 🔥 FORMAT DATA BASED ON lang
+    // ------------------------------
+    const formattedIssues = sortedIssues.map(issue => ({
+      _id: issue._id,
+      image: issue.image,
+      date: issue.date,
+
+      description: issue.description?.[lang] || issue.description.en,
+      issueType: issue.issueType?.[lang] || issue.issueType.en,
+      priority: issue.priority?.[lang] || issue.priority.en,
+      status: issue.status?.[lang] || issue.status.en,
+
+      likes: issue.likes,
+      user: issue.user,
+      assignedTo: issue.assignedTo,
+
+      geoLocation: issue.geoLocation,
+      locationDetails: issue.locationDetails
+    }));
+    
+    console.log("formatedIssues", formattedIssues)
     res.json({
-      count: sortedIssues.length,
-      issues: sortedIssues,
+      count: formattedIssues.length,
+      issues: formattedIssues
     });
   } catch (err) {
     console.error("Nearby issues error:", err);
     res.status(500).json({ error: "Failed to fetch nearby issues" });
   }
 });
+
 
 router.post("/:id/like", protect, async (req, res) => {
   try {
@@ -286,6 +340,9 @@ router.post("/assign", async (req, res) => {
     console.log("Assign report endpoint called");
     const { reportId, staffId } = req.body;
 
+    console.log("reportId", reportId);
+    console.log("staffId", staffId);
+
     if (!reportId || !staffId)
       return res.status(400).json({ message: "reportId and staffId are required" });
 
@@ -296,7 +353,7 @@ router.post("/assign", async (req, res) => {
     if (!staff) return res.status(404).json({ message: "Staff not found" });
 
     issue.assignedTo = staff._id;
-    issue.status = "assigned";
+    issue.status.en = "assigned";
     await issue.save();
 
     if (!staff.assignedIssues.includes(issue._id)) {
@@ -307,6 +364,46 @@ router.post("/assign", async (req, res) => {
   } catch (err) {
     console.error("Assign report error:", err);
     res.status(500).json({ message: "Failed to assign report" });
+  }
+});
+
+router.post("/assignAsCompleted/:issueId", async(req, res) => {
+  try{
+    console.log("Assign report as completed bruhh");
+
+    const {issueId} = req.params;
+    const issue = await Issue.findById(issueId);
+
+    issue.status.en = "resolved";
+    await issue.save();
+
+    res.json({"completed": "ayipoledhu"});
+
+  }catch (err) {
+    console.error("Assign report error:", err);
+    res.status(500).json({ message: "Failed to assign report" });
+  }
+})
+
+router.get("/:id", async (req, res) => {
+  try {
+    const issueId = req.params.id;
+    const issue = await Issue.findById(issueId)
+      .populate("user", "name email") 
+      .populate("assignedTo", "name email department");
+
+    if (!issue) {
+      return res.status(404).json({ message: "Issue not found" });
+    }
+
+    console.log("issue is", issue);
+    res.status(200).json(issue);
+  } catch (err) {
+    console.error("Error fetching issue by ID:", err);
+    if (err.kind === 'ObjectId') {
+        return res.status(400).json({ message: "Invalid issue ID format" });
+    }
+    res.status(500).json({ message: "Server error while fetching issue" });
   }
 });
 

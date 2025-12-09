@@ -98,24 +98,62 @@ router.post("/token", protectStaff, async (req, res) => {
   }
 });
 
+// router.get("/tasks", protectStaff, async (req, res) => {
+//   try {
+//     const staffId = req.user._id;
+//     console.log("/tasks is called");
+
+//     const staff = await Staff.findById(staffId)
+//       .populate({
+//         path: "assignedIssues",
+//         select: "description issueType locationDetails image status date",
+//       });
+
+//     if (!staff) {
+//       return res.status(404).json({ message: "Staff not found" });
+//     }
+
+//     console.log("Assigned tasks:", staff.assignedIssues);
+
+//     res.status(200).json({"tasks": staff.assignedIssues, "staffLocation": staff.geoLocation });
+//   } catch (error) {
+//     console.error("Error fetching tasks:", error);
+//     res.status(500).json({ message: "Failed to fetch tasks" });
+//   }
+// });
+
 router.get("/tasks", protectStaff, async (req, res) => {
   try {
     const staffId = req.user._id;
-    console.log("/tasks is called");
 
-    const staff = await Staff.findById(staffId)
-      .populate({
-        path: "assignedIssues",
-        select: "description issueType locationDetails image status date",
-      });
-
+    const staff = await Staff.findById(staffId);
     if (!staff) {
       return res.status(404).json({ message: "Staff not found" });
     }
 
-    console.log("Assigned tasks:", staff.assignedIssues);
+    const assignedIds = staff.assignedIssues;
 
-    res.status(200).json(staff.assignedIssues);
+    // Default: NEAREST tasks
+    const tasks = await Issue.aggregate([
+      {
+        $geoNear: {
+          near: {
+            type: "Point",
+            coordinates: staff.geoLocation.coordinates,
+          },
+          distanceField: "distance",
+          spherical: true,
+          query: { _id: { $in: assignedIds } }, 
+        },
+      },
+      { $sort: { distance: 1 } }
+    ]);
+
+    res.status(200).json({
+      tasks,
+      staffLocation: staff.geoLocation,
+    });
+
   } catch (error) {
     console.error("Error fetching tasks:", error);
     res.status(500).json({ message: "Failed to fetch tasks" });
@@ -158,6 +196,8 @@ router.get("/nearby/:department/:issueId", async (req, res) => {
     console.log("nearby staff endpoint called");
     const { department, issueId } = req.params;
 
+    console.log("departement", department);
+    console.log("issyeId", issueId);
     const issue = await Issue.findById(issueId);
     if (!issue) return res.status(404).json({ message: "Issue not found" });
 
@@ -171,7 +211,8 @@ router.get("/nearby/:department/:issueId", async (req, res) => {
           $maxDistance: 5000,
         },
       },
-    }).select("-password");
+    });
+
     console.log("nearbyStaff",nearbyStaff);
     res.status(200).json({
       message:
@@ -179,11 +220,87 @@ router.get("/nearby/:department/:issueId", async (req, res) => {
           ? "Nearby staff members found"
           : "No nearby staff found within 5 km",
       count: nearbyStaff.length,
-      staff: nearbyStaff, // <-- frontend uses this key
+      staff: nearbyStaff
     });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Internal server error" });
   }
 });
+
+
+router.get("/filter/:staffId", async (req, res) => {
+  try {
+    console.log("Inside the filter");
+
+    const { staffId } = req.params;
+    const { type } = req.query;
+
+    const staff = await Staff.findById(staffId);
+    if (!staff) return res.status(404).json({ message: "Staff not found" });
+
+    const assignedIds = staff.assignedIssues;  // only these should be returned
+    let issues = [];
+
+    // 1️⃣ NEAREST OPTION
+    if (type === "nearest") {
+      issues = await Issue.aggregate([
+        {
+          $geoNear: {
+            near: {
+              type: "Point",
+              coordinates: staff.geoLocation.coordinates,
+            },
+            distanceField: "distance",
+            spherical: true,
+            query: {
+              _id: { $in: assignedIds }  // FILTER HERE
+            },
+          },
+        },
+        { $sort: { distance: 1 } },
+      ]);
+
+      return res.json({ success: true, issues });
+    }
+
+    // 2️⃣ PRIORITY OPTION (urgent → high → normal → low)
+    if (type === "priority") {
+
+      issues = await Issue.aggregate([
+        {
+          $match: { 
+            _id: { $in: assignedIds }  // FILTER HERE
+          }
+        },
+        {
+          $addFields: {
+            priorityWeight: {
+              $switch: {
+                branches: [
+                  { case: { $eq: ["$priority.en", "urgent"] }, then: 4 },
+                  { case: { $eq: ["$priority.en", "high"] }, then: 3 },
+                  { case: { $eq: ["$priority.en", "normal"] }, then: 2 },
+                  { case: { $eq: ["$priority.en", "low"] }, then: 1 },
+                ],
+                default: 0,
+              },
+            },
+          },
+        },
+        { $sort: { priorityWeight: -1, date: -1 } },
+      ]);
+
+      return res.json({ success: true, issues });
+    }
+
+    return res.status(400).json({ message: "Invalid filter type" });
+
+  } catch (err) {
+    console.error("Filter Error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
 export default router;

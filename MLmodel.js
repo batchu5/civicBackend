@@ -1,20 +1,8 @@
 // classifier/model.js
 import fetch from "node-fetch";
 
-const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "http://localhost:8000/predict";
+const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "http://localhost:8001/predict";
 
-/**
- * Call ML service and return a safe decision object.
- * Returns:
- * {
- *   priority: "urgent"|"high"|"normal",
- *   confidence: 0.0-1.0,
- *   probs: { high, normal, urgent } | null,
- *   explain: {...} | null,
- *   manual_review: boolean,
- *   raw: original ml json or fallback info
- * }
- */
 export async function classifyIssue(category, description) {
   const payload = { category, description };
   const controller = new AbortController();
@@ -75,7 +63,6 @@ export async function classifyIssue(category, description) {
     clearTimeout(timeout);
     console.error("ML service error:", err.message);
 
-    // Conservative fallback: escalate to high and require manual review
     return {
       priority: "high",
       confidence: 0.35,
